@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
+from statistics import mean
 
 from lab8.console import utf8_stdio
 from lab9 import stats
@@ -44,8 +46,45 @@ def slice_check(pr: dict, base: dict, spec: dict) -> tuple[list[str], list[str]]
       - fail if below "min", or if no_significant_drop and the paired CI over the slice's items
         lies entirely below 0
     Return (blocked ids like "slice:money_movement/pass_rate", report lines)."""
-    # TODO M5
-    return [], []
+    blocked, lines = [], []
+    bootstrap = spec.get("bootstrap", {})
+    for section in spec.get("slices", []):
+        name, metric = section["name"], section["metric"]
+        slice_id = f"slice:{name}/{metric}"
+        scores = per_item(pr, metric, slice_name=name)
+        value = mean(scores.values()) if scores else None
+        note = ""
+        if value is None or not math.isfinite(value):
+            failed, note = True, "missing or non-finite slice scores"
+        else:
+            floor = section.get("min")
+            failed = floor is not None and value < floor
+            if failed:
+                note = f"below floor {floor:.3f}"
+            if section.get("no_significant_drop"):
+                reference = per_item(base, metric, slice_name=name)
+                if scores.keys() != reference.keys() or not all(map(math.isfinite, reference.values())):
+                    failed = True
+                    note = "slice items or scores do not match a valid baseline"
+                else:
+                    keys = sorted(scores)
+                    delta, lo, hi = stats.paired_bootstrap(
+                        [scores[key] for key in keys], [reference[key] for key in keys],
+                        n_resamples=bootstrap.get("n_resamples", 1000),
+                        rng=bootstrap.get("rng", 2027),
+                        confidence=bootstrap.get("confidence", 0.95),
+                    )
+                    interval = f"Δ {delta:+.3f} CI [{lo:+.3f}, {hi:+.3f}]"
+                    note = f"{note} · {interval}" if note else interval
+                    failed = failed or hi < 0
+        verdict = "ok"
+        if failed:
+            verdict = "BLOCK" if section.get("blocking") else "warn"
+            if section.get("blocking"):
+                blocked.append(slice_id)
+        display_value = f"{value:.4f}" if value is not None else "missing"
+        lines.append(f"  {slice_id} {display_value} {note} {verdict}")
+    return blocked, lines
 
 
 def check(pr: dict, base: dict, spec: dict, base_spec: dict | None = None) -> tuple[list[str], list[str]]:

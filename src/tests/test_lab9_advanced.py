@@ -63,6 +63,24 @@ def test_integrity_flags_loosened_spec():
     assert gate.integrity_check(base, base, SPEC, SPEC) == []
 
 
+def test_integrity_rejects_duplicate_rows_evaluator_errors_and_retagging():
+    from lab9 import gate
+
+    base = _report(copy.deepcopy(ROWS), {"pass_rate": 1.0})
+
+    duplicate = copy.deepcopy(base)
+    duplicate["rows"][-1] = copy.deepcopy(duplicate["rows"][0])
+    assert any("duplicate" in p for p in gate.integrity_check(duplicate, base, SPEC))
+
+    crashed = copy.deepcopy(base)
+    crashed["evaluator_failures"] = ["E-000@1:TrialPass: grader crashed"]
+    assert any("evaluator failures" in p for p in gate.integrity_check(crashed, base, SPEC))
+
+    retagged = copy.deepcopy(base)
+    retagged["rows"][0]["slices"] = []
+    assert any("slice tags" in p for p in gate.integrity_check(retagged, base, SPEC))
+
+
 def test_slice_check_blocks_a_slice_below_floor():
     from lab9 import gate
 

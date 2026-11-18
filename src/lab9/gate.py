@@ -18,6 +18,67 @@ from statistics import mean
 from lab8.console import utf8_stdio
 from lab9 import stats
 from lab9.eval import SPEC, load_spec, per_item
+from lab9.graders import GRADERS
+
+
+def _ratchet(spec: dict, base_spec: dict) -> list[str]:
+    if spec.get("eval_set_version") != base_spec.get("eval_set_version"):
+        return []
+    problems = []
+    for section, key in (("metrics", lambda m: m["id"]),
+                         ("slices", lambda s: (s["name"], s["metric"]))):
+        current = {key(entry): entry for entry in spec.get(section, [])}
+        for previous in base_spec.get(section, []):
+            name = key(previous)
+            entry = current.get(name)
+            if entry is None:
+                problems.append(f"ratchet: removed {section} entry {name}")
+                continue
+            if previous.get("blocking") and not entry.get("blocking"):
+                problems.append(f"ratchet: disabled blocking for {name}")
+            old = previous.get("threshold", {}) if section == "metrics" else previous
+            new = entry.get("threshold", {}) if section == "metrics" else entry
+            for bound in ("min", "max", "max_increase"):
+                if bound not in old:
+                    continue
+                value = new.get(bound)
+                if value is None or (value < old[bound] if bound == "min" else value > old[bound]):
+                    problems.append(f"ratchet: loosened {bound} for {name}")
+            if old.get("no_significant_drop") and not new.get("no_significant_drop"):
+                problems.append(f"ratchet: removed no_significant_drop for {name}")
+    return problems
+
+
+def _report_keys(report: dict, name: str, graded: set[str], problems: list[str]) -> dict:
+    manifest = report["manifest"]
+    seeds = set(manifest["seeds"])
+    rows = report["rows"]
+    if report.get("evaluator_failures"):
+        problems.append(f"{name}: evaluator failures")
+    if len(rows) != manifest["items"] * len(manifest["seeds"]):
+        problems.append(f"{name}: row count differs from manifest")
+    for metric, value in report["metrics"].items():
+        if isinstance(value, float) and not math.isfinite(value):
+            problems.append(f"{name}: {metric} is not finite")
+
+    keys, item_seeds, missing = {}, {}, set()
+    for row in rows:
+        item, seed = row["item_id"], row["seed"]
+        pair = (item, seed)
+        keys[pair] = frozenset(row.get("slices") or [])
+        item_seeds.setdefault(item, set()).add(seed)
+        for metric in graded:
+            if type(row.get(metric)) is not bool:
+                missing.add(metric)
+    if len(keys) != len(rows):
+        problems.append(f"{name}: duplicate (item_id, seed) rows")
+    if len(seeds) != len(manifest["seeds"]) or len(item_seeds) != manifest["items"] or any(
+        actual != seeds for actual in item_seeds.values()
+    ):
+        problems.append(f"{name}: rows do not cover the manifest item × seed grid")
+    if missing:
+        problems.append(f"{name}: missing or invalid grader scores: {', '.join(sorted(missing))}")
+    return keys
 
 
 def integrity_check(pr: dict, base: dict, spec: dict, base_spec: dict | None = None) -> list[str]:
@@ -35,8 +96,22 @@ def integrity_check(pr: dict, base: dict, spec: dict, base_spec: dict | None = N
         including dropping no_significant_drop)
       - an item's slice tags in PR rows differ from the baseline's (relabelling an item out of a
         slice hides its regression from the slice gate)"""
-    # TODO M7
-    return []
+    problems = []
+    graded = {metric["id"] for metric in spec["metrics"] if metric["id"] in GRADERS}
+    pr_keys = _report_keys(pr, "PR", graded, problems)
+    # A baseline can predate a newly added grader, so validate its row scores
+    # against the spec that generated it when available.
+    baseline_metrics = base_spec["metrics"] if base_spec is not None else spec["metrics"]
+    base_graded = {metric["id"] for metric in baseline_metrics if metric["id"] in GRADERS
+                   and (base_spec is not None or metric["id"] in base["metrics"])}
+    base_keys = _report_keys(base, "baseline", base_graded, problems)
+    if pr_keys.keys() != base_keys.keys():
+        problems.append("PR and baseline have different (item_id, seed) sets")
+    elif pr_keys != base_keys:
+        problems.append("PR and baseline have different slice tags")
+    if base_spec is not None:
+        problems.extend(_ratchet(spec, base_spec))
+    return problems
 
 
 def slice_check(pr: dict, base: dict, spec: dict) -> tuple[list[str], list[str]]:

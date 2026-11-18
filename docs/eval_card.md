@@ -26,3 +26,11 @@ Eval set SHA `cd109a409671` gồm 14 claim v1 và 14 claim adversarial, chạy 5
 | slice_regression | 93,57% | 85,00% | 91,43% | Chặn tại money_movement |
 
 `slice_regression` đạt sàn tổng 85% và CI 95% của chênh lệch tổng là [−12,1; +2,9] điểm phần trăm. Slice `money_movement` giảm từ 100% xuống 85%, dưới sàn 90%. Slice `adversarial` kiểm riêng các claim trong pack, với sàn 85%. Cả hai slice chặn nếu CI của chênh lệch so với baseline nằm hoàn toàn dưới 0. Đánh giá độ ổn định theo A/A và chọn sàn `pass_hat_5` ở M6.
+
+## v2 — Độ ổn định theo seed (M6)
+
+A/A chạy cùng `swarm` với hai bộ seed `11,22,33,44,55` và `66,77,88,99,110`. Tất cả metric có Δ = 0 trên hai bộ này. Mỗi bộ có `pass_rate` 97,86%, `pass@5` 100% và `pass_hat_5` 89,29%. Chọn sàn chặn `pass_hat_5` = 80%, thấp hơn 9,29 điểm phần trăm so với cả hai quan sát A/A.
+
+`flaky_regression` đạt `pass_rate` 91,43%, trên sàn tổng 85%, và `pass@5` 100%. Tuy nhiên chỉ 57,14% item đạt cả 5 lượt, nên `pass_hat_5` chặn độc lập. Trong lần chạy này, CI của `pass_rate` và slice `money_movement` cũng chặn. Scorecard v2 chặn 3/3 regression và cho qua cả hai variant đối chứng.
+
+MockLLM tái lập được kết quả với cấu hình cố định. Hai bộ seed trên chỉ cho biết nhiễu quan sát trong phép đo này. Với LLM thật, sampling và biến động của dịch vụ có thể tạo chênh lệch A/A. Cần thêm lượt đo trước khi dùng sàn cho model thật. Năm seed không đủ để phát hiện ổn định lỗi có xác suất xuất hiện 1/3 mỗi lượt. Với giả định các lượt độc lập, xác suất cả 5 lượt bỏ sót là (2/3)^5, khoảng 13%.

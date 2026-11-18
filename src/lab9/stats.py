@@ -61,8 +61,32 @@ def paired_bootstrap(a: Sequence[float], b: Sequence[float], *, n_resamples: int
     """a[i], b[i] = per-item mean over seeds, SAME items, SAME order.
     Return (mean(a)-mean(b), lo, hi) with scipy.stats.bootstrap(paired=True, method="percentile",
     rng=numpy.random.default_rng(rng)). If a == b everywhere return (0.0, 0.0, 0.0)."""
-    # TODO M4
-    raise NotImplementedError
+    import numpy as np
+    from scipy.stats import bootstrap
+
+    pr = np.asarray(a, dtype=float)
+    base = np.asarray(b, dtype=float)
+    if pr.ndim != 1 or pr.shape != base.shape or pr.size == 0:
+        raise ValueError("paired bootstrap needs two nonempty vectors of equal length")
+    if not (np.isfinite(pr).all() and np.isfinite(base).all()):
+        raise ValueError("paired bootstrap needs finite scores")
+
+    def mean_delta(x, y, axis=-1):
+        return np.mean(x - y, axis=axis)
+
+    delta = float(mean_delta(pr, base))
+    if pr.size == 1 or np.array_equal(pr, base):
+        return delta, delta, delta
+    interval = bootstrap(
+        (pr, base),
+        mean_delta,
+        paired=True,
+        method="percentile",
+        n_resamples=n_resamples,
+        confidence_level=confidence,
+        rng=np.random.default_rng(rng),
+    ).confidence_interval
+    return delta, float(interval.low), float(interval.high)
 
 
 def pass_at_k(n: int, c: int, k: int) -> float:

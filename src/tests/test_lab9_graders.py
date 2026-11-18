@@ -48,3 +48,30 @@ def test_wrong_amount_in_ledger(graders):
 
 def test_override_event_breaks_db_fact(graders):
     assert graders.DbFactKept().evaluate(ctx(trial(events=[{"kind": "model_override", "payload": {}}]))).value is False
+
+
+def test_capped_refund_reply_matches_committed_amount(graders, monkeypatch):
+    from lab8.shapes import SHAPES
+    from lab9.trace_case import investigate
+    from lab9.variant_agent import make_shape
+
+    shape = "m3_misreport"
+    monkeypatch.setitem(SHAPES, shape, make_shape(shape, {"no_override", "misreport"}))
+    bad = investigate(shape, "C-008", 11)
+    good = investigate("fixed", "C-008", 11)
+    assert bad["trial"]["lab8_pass"] and good["trial"]["lab8_pass"]
+
+    grader = graders.ReplyRefundMatchesLedger()
+    assert grader.evaluate(ctx(bad["trial"], bad["label"])).value is False
+    assert grader.evaluate(ctx(good["trial"], good["label"])).value is True
+
+
+def test_pre_deduction_is_visible_even_when_ledger_is_correct(graders):
+    from lab9.trace_case import investigate
+
+    case = investigate("seeded_regression", "C-013", 11)
+    control = investigate("fixed", "C-013", 11)
+    trial_ctx = ctx(case["trial"], case["label"])
+    assert graders.RefundAmountCorrect().evaluate(trial_ctx).value is True
+    assert graders.ProposalAmountCorrect().evaluate(trial_ctx).value is False
+    assert graders.ProposalAmountCorrect().evaluate(ctx(control["trial"], control["label"])).value is True
